@@ -1,1 +1,96 @@
-# npc_fcs_mpc_vs_pi
+# FCS-MPC vs PI-dq + SPWM for a 3-level NPC inverter
+
+MATLAB/Octave simulation comparing three current-control strategies for a 3-level NPC (Neutral Point Clamped) inverter feeding a three-phase RL load:
+
+| # | Controller | Neutral-point (NP) balancing |
+|---|------------|------------------------------|
+| 1 | **FCS-MPC** with one-step delay compensation | `lambda*abs(dV)` term in the cost function |
+| 2 | **PI in the dq frame** + level-shifted SPWM (PD) | None |
+| 3 | Same as 2 | Common-mode offset proportional to `dV` |
+
+Controller 3 exists to keep the comparison fair: comparing an MPC that balances the NP against a PWM that does not favors the MPC by construction.
+
+## How to run
+
+```matlab
+npc_fcs_mpc_vs_pi
+```
+
+- MATLAB R2016b or later (uses implicit expansion and local functions in scripts) or GNU Octave.
+- No toolboxes required.
+- Run time: on the order of 20 s in Octave.
+
+The script prints a metrics table in the Command Window and produces three figures.
+
+## Model
+
+- **DC link:** ideal source `Vdc = 600 V` across two equal capacitors of `C = 2 mF` each. Hence `Vc1 + Vc2 = Vdc`, and `dV = Vc1 - Vc2` follows `C*d(dV)/dt = i_np`, where `i_np = sum(1 - |S_x|)*i_x` is the current injected into the midpoint.
+- **Pole voltage:** `+Vc1` (state +1), `0` (state 0), `-Vc2` (state -1). The capacitor voltages feed back into the plant.
+- **Load:** wye-connected RL with isolated neutral (`R = 5 ohm`, `L = 10 mH`). The phase voltage is `v_xO - mean(v_aO, v_bO, v_cO)`.
+- **Discretization:** the plant uses exact (ZOH) discretization with `dt = 2 us`; the MPC uses forward Euler with `Ts = 20 us`. The controller model is therefore not identical to the plant.
+- **Reference:** three-phase sinusoidal currents at 60 Hz with an amplitude step from 10 A to 15 A at `t = 50 ms`.
+
+### FCS-MPC
+
+At every `Ts`:
+
+1. Uses the state chosen in the previous step (the one currently being applied) to predict `i(k+1)` and `dV(k+1)`. This compensates the one-step computational delay.
+2. Evaluates the 27 candidate states over `i(k+2)` and `dV(k+2)`.
+3. Minimizes `g = sum(((i_ref - i_pred)/I_base)^2) + lambda*abs(dV_pred)/V_base`.
+
+### PI-dq + PD-SPWM
+
+- PI controller with `wL` decoupling, conditional-integration anti-windup, and the voltage vector limited to `Vdc/2`.
+- Tuning by pole cancellation: `Kp = L*wc`, `Ki = R*wc`, with a 500 Hz bandwidth.
+- 5 kHz triangular carrier, sampled at peaks and valleys (10 kHz), with the reference held for half a carrier period.
+- The plant is simulated at 2 us, so the carrier has 100 samples per period.
+
+## Metrics and reference results
+
+Results obtained with GNU Octave 8.4 and the parameters in the script:
+
+| Controller | THD 10 A (%) | THD 15 A (%) | Avg. f_sw (kHz) | max \|dV\| (V) | rms dV (V) | Settling time (ms) |
+|---|---|---|---|---|---|---|
+| FCS-MPC | 1.37 | 1.06 | 17.9 | 0.15 | 0.04 | 0.15 |
+| PI-dq + SPWM | 1.72 | 1.41 | 5.0 | 1.90 | 0.82 | 0.68 |
+| PI-dq + SPWM + NP bal. | 1.66 | 1.32 | 5.0 | 0.52 | 0.23 | 0.68 |
+
+Definitions:
+
+- **THD:** square root of the difference between the total rms value (DC removed) and the fundamental rms value, divided by the fundamental rms, over 2 whole steady-state cycles. It includes all components, switching ripple included.
+- **Average f_sw:** level transitions per phase divided by `2*T`. This equals the per-switch switching frequency, and gives exactly the carrier frequency for the PWM.
+- **Settling time:** time until `i_d` stays within +-5 % of 15 A after the step.
+
+**Read with care:** the MPC leads in THD and dynamic response, but it switches about 3.5 times more than the PWM (17.9 vs 5 kHz). Comparing at equal average switching frequency is a natural next step (for example, raising the PWM carrier to about 18 kHz).
+
+## Sensitivity to lambda
+
+| `lambda` | THD 10 A (%) | f_sw (kHz) | max \|dV\| (V) |
+|---|---|---|---|
+| 0 | 1.19 | 20.1 | **257** (diverges) |
+| 0.05 | 1.37 | 17.9 | 0.15 |
+| 0.2 | 2.10 | 16.0 | 0.07 |
+| 0.5 | 2.21 | 15.9 | 0.05 |
+| 1 | 2.45 | 15.2 | 0.04 |
+
+Without the NP term the imbalance diverges, so it is essential. Increasing `lambda` improves balancing but degrades the current. The default (`0.05`) is a compromise and should be tuned for your case.
+
+## Limitations
+
+- Ideal DC source with constant `Vc1 + Vc2`; no rectifier, series resistance, or capacitor losses are modeled.
+- Ideal switches: no dead time, no voltage drops, no losses.
+- The MPC has a horizon of 2 (one compensation step plus one optimization step) and no switching constraint.
+- Results were verified in GNU Octave; MATLAB should give equivalent results, but please confirm in your environment.
+- The comparison depends on the tuning (`lambda`, `f_bw`, `k_np`) and on the switching frequency; do not generalize beyond this scenario.
+
+## Structure
+
+```
+npc_fcs_mpc_vs_pi.m      main script (local functions at the end)
+figures/                 figures generated by the script
+README.md
+```
+
+## Citation
+
+Developed for research and educational purposes in power electronics and control systems. If you use this code in your work, please cite it using the DOI associated with this repository.
