@@ -1,4 +1,4 @@
-# https://doi.org/10.5281/zenodo.23821944
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23821944.svg)](https://doi.org/10.5281/zenodo.23821944)
 # FCS-MPC vs PI-dq + SPWM for a 3-level NPC inverter
 
 MATLAB/Octave simulation comparing three current-control strategies for a 3-level NPC (Neutral Point Clamped) inverter feeding a three-phase RL load:
